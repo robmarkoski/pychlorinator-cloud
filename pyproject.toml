@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pychlorinator_cloud"
+version = "0.2.2"
+description = "Cloud client library for AstralPool Halo chlorinators"
+readme = "pychlorinator_cloud/README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "websockets>=12.0",
+]
+keywords = ["astralpool", "chlorinator", "home-assistant", "halo"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Framework :: AsyncIO",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Home Automation",
+]
+
+[project.urls]
+Homepage = "https://github.com/robmarkoski/pychlorinator-cloud"
+Issues = "https://github.com/robmarkoski/pychlorinator-cloud/issues"
+Repository = "https://github.com/robmarkoski/pychlorinator-cloud"
+
+[tool.setuptools.packages.find]
+include = ["pychlorinator_cloud*"]

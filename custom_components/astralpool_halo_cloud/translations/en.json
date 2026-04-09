@@ -1,0 +1,86 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Setup Method",
+        "description": "Choose how you want to set up your chlorinator.",
+        "menu_options": {
+          "ble_discovery": "BLE pairing / discovery",
+          "manual": "Manual cloud credentials"
+        }
+      },
+      "ble_discovery": {
+        "title": "BLE Pairing / Discovery",
+        "description": "Make sure your chlorinator is powered on and nearby. Home Assistant will look for it over Bluetooth. Once it is found, press Submit in Home Assistant first, then enable Pair Mode on the chlorinator panel when prompted."
+      },
+      "ble_discovery_timeout": {
+        "title": "No Chlorinator Found",
+        "description": "No Halo chlorinator was found over Bluetooth in time. You can try BLE discovery again or switch to manual cloud credentials.",
+        "data": {
+          "use_manual": "Use manual cloud credentials instead"
+        }
+      },
+      "manual": {
+        "title": "Manual Setup",
+        "description": "Enter your chlorinator credentials manually. After validation, you can choose the Home Assistant device name and optional area.",
+        "data": {
+          "serial_number": "Serial Number",
+          "username": "Username",
+          "password": "Password"
+        }
+      },
+      "device_details": {
+        "title": "Device Details",
+        "description": "Choose how Halo {serial_number} should appear in Home Assistant.",
+        "data": {
+          "device_name": "Device Name",
+          "area_id": "Area"
+        }
+      },
+      "ble_confirm": {
+        "title": "Chlorinator Found",
+        "description": "Found {name}. Press Submit here first. As soon as Home Assistant moves to the next step, go to the chlorinator panel and enable Pair Mode. After pairing, you can choose the Home Assistant device name and optional area."
+      },
+      "wait_for_pairing": {
+        "title": "Waiting for Pairing Mode",
+        "description": "Now go to the chlorinator panel and enable Pair Mode. Home Assistant is actively waiting for the pairing advertisement."
+      },
+      "pairing_timeout": {
+        "title": "Pairing Timeout",
+        "description": "The chlorinator did not enter pairing mode in time. Please try again in this order: press Submit in Home Assistant, then immediately enable Pair Mode on the chlorinator panel."
+      },
+      "ble_username": {
+        "title": "Choose Username",
+        "description": "Enter a username to register on the chlorinator. This will be used for cloud access. Max 14 characters.",
+        "data": {
+          "username": "Username"
+        }
+      },
+      "ble_pair_failed": {
+        "title": "Pairing Failed",
+        "description": "BLE pairing did not complete. You can retry or switch to manual credential entry.",
+        "data": {
+          "use_manual": "Enter credentials manually instead"
+        }
+      }
+    },
+    "progress": {
+      "ble_discovery": "Looking for your chlorinator over Bluetooth...",
+      "wait_for_pairing": "Waiting for chlorinator to enter pairing mode..."
+    },
+    "error": {
+      "cannot_connect": "Could not connect to the chlorinator. Check credentials and ensure the chlorinator is online.",
+      "pairing_timeout": "Pairing timed out. Make sure the chlorinator is in pairing mode and nearby.",
+      "pairing_failed": "BLE pairing failed. The chlorinator may have rejected the request.",
+      "bleak_not_installed": "BLE support is not available. Install bleak or use manual credential entry.",
+      "username_too_long": "Username must be 14 characters or less.",
+      "username_required": "Username is required.",
+      "device_name_required": "Device name is required.",
+      "unknown": "An unexpected error occurred."
+    },
+    "abort": {
+      "already_configured": "This chlorinator is already configured.",
+      "not_supported": "This device is not supported."
+    }
+  }
+}
