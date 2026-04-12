@@ -24,7 +24,7 @@ from .models import SignallingAnswer, StunEndpoint
 LOGGER = logging.getLogger(__name__)
 
 
-def _map_signalling_failure(reason_code: int) -> SignallingError:
+def map_signalling_failure(reason_code: int) -> SignallingError:
     reason_name = SIGNALLING_FAIL_REASON_MAP.get(reason_code, "unknown_error")
     message = f"Signalling failed with reason {reason_code} ({reason_name})"
     if reason_code == 1:
@@ -100,7 +100,7 @@ class HaloSignallingClient:
         payload = response.get("payload") or {}
         if int(response.get("success", 0)) != 1:
             fail_reason = int(payload.get("failReason", 0))
-            raise _map_signalling_failure(fail_reason)
+            raise map_signalling_failure(fail_reason)
 
         try:
             return SignallingAnswer(

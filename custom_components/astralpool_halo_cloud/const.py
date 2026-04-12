@@ -9,14 +9,9 @@ CONF_USERNAME = "username"
 CONF_PASSWORD = "password"
 CONF_DEVICE_NAME = "device_name"
 CONF_AREA_ID = "area_id"
+CONF_TIME_DRIFT_THRESHOLD_MINUTES = "time_drift_threshold_minutes"
 
-PLATFORMS = ["sensor", "binary_sensor", "select"]
-
-# Poll every 5 minutes to share the single connection slot with BLE
-POLL_INTERVAL = 300  # seconds (5 minutes)
-
-# How long to stay connected collecting data each poll cycle
-DATA_COLLECTION_SECONDS = 25  # needs ~20s to get state + measurements + stats
+PLATFORMS = ["sensor", "binary_sensor", "select", "number", "button"]
 
 
 def default_device_name(serial_number: str | None) -> str:

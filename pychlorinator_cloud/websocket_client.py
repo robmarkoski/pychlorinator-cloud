@@ -17,18 +17,14 @@ import websockets
 from .const import (
     SIGNALLING_AUTH_PASSWORD,
     SIGNALLING_AUTH_USERNAME,
-    SIGNALLING_FAIL_REASON_MAP,
     SIGNALLING_WS_URL,
 )
 from .exceptions import (
-    SignallingAuthenticationError,
-    SignallingBusyError,
-    SignallingDosProtectionError,
     SignallingError,
-    SignallingRateLimitedError,
-    SignallingUnavailableError,
 )
 from .setpoints import build_setpoint_command
+from .signalling import map_signalling_failure
+from .timers import parse_timer_capabilities, parse_timer_config, parse_timer_setup, parse_timer_state
 
 LOGGER = logging.getLogger(__name__)
 
@@ -97,6 +93,26 @@ class ChlorinatorLiveData:
     heater_on: bool = False
     heater_error: Optional[int] = None
 
+    # Controller clock (cmd 0x0002 / 0x0003)
+    controller_datetime: Optional[datetime.datetime] = None
+    controller_weekday: Optional[int] = None
+
+    # App-writable controls not yet fully observable from readback
+    light_mode: Optional[str] = None  # Off, On, Auto
+    blade_mode: Optional[str] = None  # Off, Auto, On
+    jets_mode: Optional[str] = None  # Off, Auto, On
+    acid_dosing_state: Optional[str] = None  # ResumeNow, OffIndefinitely, OffForPeriod
+    acid_dosing_hold_minutes: Optional[int] = None
+
+    # Timer diagnostics (read-only for now)
+    equipment_timer_slots: Optional[int] = None
+    lighting_timer_slots: Optional[int] = None
+    timer_capability_flags: list[int] = field(default_factory=list)
+    timer_season: Optional[str] = None
+    timer_season_source: Optional[str] = None
+    timer_profile_index: Optional[int] = None
+    timer_configs: dict[int, dict[str, Any]] = field(default_factory=dict)
+
     # Raw payloads for debugging
     raw_payloads: dict[int, bytes] = field(default_factory=dict)
 
@@ -153,23 +169,21 @@ MODES = {0: "Off", 1: "Auto", 2: "On"}
 # ChlorinatorActions — the action enum for cloud writes
 # Confirmed command ID: 0x01F4 (500)
 ACTION_CMD_ID = 0x01F4
+LIGHT_CMD_ID = 0x01F5
+HEATER_CMD_ID = 0x01F6
+TIME_CMD_ID = 0x0002
+DATE_CMD_ID = 0x0003
+
+LIGHT_MODES = {1: "Off", 2: "On", 3: "Auto"}
+ACTION_MODES = {1: "Off", 2: "Auto", 3: "On"}
+
+BLADE_TARGET_ID = 6
+JETS_TARGET_ID = 7
 
 
-def _map_signalling_failure(reason_code: int) -> SignallingError:
-    """Map a signalling failure code to a typed exception."""
-    reason_name = SIGNALLING_FAIL_REASON_MAP.get(reason_code, "unknown_error")
-    message = f"Signalling failed with reason {reason_code} ({reason_name})"
-    if reason_code == 1:
-        return SignallingUnavailableError(message)
-    if reason_code == 2:
-        return SignallingAuthenticationError(message)
-    if reason_code == 3:
-        return SignallingBusyError(message)
-    if reason_code == 4:
-        return SignallingRateLimitedError(message)
-    if reason_code == 5:
-        return SignallingDosProtectionError(message)
-    return SignallingError(message)
+async def _sleep_briefly(delay_seconds: float) -> None:
+    """Sleep helper isolated for bounded post-write refreshes."""
+    await asyncio.sleep(delay_seconds)
 
 
 def _parse_state(data: bytes) -> dict[str, Any]:
@@ -316,7 +330,7 @@ def _parse_water_volume(data: bytes) -> dict[str, Any]:
 
 def _parse_temperature(data: bytes) -> dict[str, Any]:
     """Parse temperature characteristic (cmd 0x0009)."""
-    if len(data) < 11:
+    if len(data) < 16:
         return {"type": "temperature", "raw": data.hex(), "error": "too short"}
 
     vals = struct.unpack_from("<BBHHHHBHHB", data)
@@ -333,9 +347,46 @@ def _parse_temperature(data: bytes) -> dict[str, Any]:
     }
 
 
+def _parse_controller_time(data: bytes) -> dict[str, Any]:
+    """Parse controller time (cmd 0x0002).
+
+    The app-confirmed write layout is:
+      second, minute, hour, ISO weekday
+    Captured reads mirror that layout in the first four bytes.
+    """
+    if len(data) < 4:
+        return {"type": "controller_time", "raw": data.hex(), "error": "too short"}
+
+    return {
+        "type": "controller_time",
+        "controller_second": data[0],
+        "controller_minute": data[1],
+        "controller_hour": data[2],
+        "controller_weekday": data[3],
+    }
+
+
+def _parse_controller_date(data: bytes) -> dict[str, Any]:
+    """Parse controller date (cmd 0x0003).
+
+    The app-confirmed write layout is:
+      day, month, year-2000
+    Captured reads mirror that layout in the first three bytes.
+    """
+    if len(data) < 3:
+        return {"type": "controller_date", "raw": data.hex(), "error": "too short"}
+
+    return {
+        "type": "controller_date",
+        "controller_day": data[0],
+        "controller_month": data[1],
+        "controller_year": 2000 + data[2],
+    }
+
+
 def _parse_heater_state(data: bytes) -> dict[str, Any]:
     """Parse heater state characteristic (cmd 0x044e / BLE 1102)."""
-    if len(data) < 11:
+    if len(data) < 12:
         return {"type": "heater_state", "raw": data.hex(), "error": "too short"}
 
     vals = struct.unpack_from("<BBBBBBBBBHB", data)
@@ -363,97 +414,23 @@ def _parse_heater_state(data: bytes) -> dict[str, Any]:
 
 
 def _parse_timer_capabilities(data: bytes) -> dict[str, Any]:
-    """Parse timer capabilities (cmd 0x0190 / BLE 400).
-
-    Confirmed so far:
-    - byte[0] = equipment timer slot count (8 on Rob's unit)
-    - byte[1] = lighting timer slot count (2 on Rob's unit)
-    - later bytes are still only partially understood feature flags
-    """
-    if len(data) < 2:
-        return {"type": "timer_capabilities", "raw": data.hex(), "error": "too short"}
-
-    return {
-        "type": "timer_capabilities",
-        "equipment_timer_slots": data[0],
-        "lighting_timer_slots": data[1],
-        "flags": list(data[2:]),
-    }
+    """Parse timer capabilities (cmd 0x0190 / BLE 400)."""
+    return parse_timer_capabilities(data)
 
 
 def _parse_timer_setup(data: bytes) -> dict[str, Any]:
-    """Parse timer setup/profile state (cmd 0x0191 / BLE 401).
-
-    Live-confirmed on Rob's unit:
-    - byte[2] flips with Summer/Winter selection
-      - 1 = Summer
-      - 0 = Winter
-    Other bytes remain under investigation.
-    """
-    if len(data) < 3:
-        return {"type": "timer_setup", "raw": data.hex(), "error": "too short"}
-
-    season_byte = data[2]
-    return {
-        "type": "timer_setup",
-        "season_byte": season_byte,
-        "season": {0: "Winter", 1: "Summer"}.get(season_byte, f"Unknown({season_byte})"),
-        "raw_bytes": list(data),
-    }
+    """Parse timer setup/profile state (cmd 0x0191 / BLE 401)."""
+    return parse_timer_setup(data)
 
 
 def _parse_timer_state(data: bytes) -> dict[str, Any]:
-    """Parse timer state/profile pointer (cmd 0x0192 / BLE 402).
-
-    Live-confirmed on Rob's unit:
-    - byte[0] changes with season/profile selection (Summer=2, Winter=1 in current tests)
-    - remaining bytes are still under investigation
-    """
-    if len(data) < 1:
-        return {"type": "timer_state", "raw": data.hex(), "error": "too short"}
-
-    return {
-        "type": "timer_state",
-        "profile_index": data[0],
-        "raw_bytes": list(data),
-    }
+    """Parse timer state/profile pointer (cmd 0x0192 / BLE 402)."""
+    return parse_timer_state(data)
 
 
 def _parse_timer_config(data: bytes) -> dict[str, Any]:
-    """Parse per-slot timer config records (cmd 0x0193 / BLE 403).
-
-    Live-confirmed on Rob's unit for slot 0:
-    - byte[0]  = slot index
-    - byte[3]  = active/enabled flag
-    - byte[4]  = equipment bitmask
-        - bit 0x04 = Heater
-        - bit 0x80 = Blade
-        - bit 0x02 = still present as a base/fixed timer-class bit
-    - byte[7]  = start hour
-    - byte[8]  = start minute
-    - byte[10] = stop hour
-    - byte[11] = stop minute
-    - byte[12] = speed enum (0x01 observed for Medium)
-    Unused/unknown bytes remain intentionally undecoded for now.
-    """
-    if len(data) < 13:
-        return {"type": "timer_config", "raw": data.hex(), "error": "too short"}
-
-    equipment_flags = data[4]
-    return {
-        "type": "timer_config",
-        "slot_index": data[0],
-        "active": bool(data[3]),
-        "equipment_flags": equipment_flags,
-        "heater_enabled": bool(equipment_flags & 0x04),
-        "blade_enabled": bool(equipment_flags & 0x80),
-        "start_hour": data[7],
-        "start_minute": data[8],
-        "stop_hour": data[10],
-        "stop_minute": data[11],
-        "speed_code": data[12],
-        "raw_bytes": list(data),
-    }
+    """Parse per-slot timer config records (cmd 0x0193 / BLE 403)."""
+    return parse_timer_config(data)
 
 
 def parse_data_payload(raw: bytes) -> dict[str, Any]:
@@ -504,9 +481,9 @@ def parse_data_payload(raw: bytes) -> dict[str, Any]:
     elif cmd_id == 0x0065:
         result.update(_parse_water_volume(data))
     elif cmd_id == 0x0002:
-        result["type"] = "device_info"
+        result.update(_parse_controller_time(data))
     elif cmd_id == 0x0003:
-        result["type"] = "device_info_2"
+        result.update(_parse_controller_date(data))
     elif cmd_id == 0x044E:
         result.update(_parse_heater_state(data))
     elif cmd_id == 0x0019:
@@ -621,7 +598,7 @@ class HaloWebSocketClient:
                     or resp.get("errorCode")
                     or 0
                 )
-                raise _map_signalling_failure(reason_code)
+                raise map_signalling_failure(reason_code)
 
             payload = resp.get("payload") or {}
             self.data.connected = True
@@ -666,7 +643,7 @@ class HaloWebSocketClient:
             1102,
         ]
 
-        LOGGER.info("Requesting all data types (cloud vomit)...")
+        LOGGER.debug("Requesting initial catch-all data snapshot...")
         for cmd_id in vomit_cmds:
             if not self._running:
                 break
@@ -679,7 +656,7 @@ class HaloWebSocketClient:
             except Exception as err:
                 LOGGER.debug("ReadForCatchAll(%d) failed: %s", cmd_id, err)
 
-        LOGGER.info("Cloud vomit complete")
+        LOGGER.debug("Initial catch-all data snapshot complete")
 
     async def query_availability(self) -> dict[str, Any]:
         """Check chlorinator availability without connecting."""
@@ -707,29 +684,156 @@ class HaloWebSocketClient:
         }
         await self._ws.send(json.dumps(msg))
 
-    async def send_action(self, action: int, period_minutes: int = 0) -> None:
-        """Send a chlorinator action command."""
-        payload = struct.pack("<Bi12x", action, period_minutes)
-        command = bytes([0x01]) + struct.pack("<H", ACTION_CMD_ID) + payload
+    async def request_data(self, cmd_id: int) -> None:
+        """Request a fresh snapshot for a single characteristic."""
+        read_cmd = bytes([0x02]) + struct.pack("<H", cmd_id) + bytes(17)
+        await self.send_command(read_cmd)
+
+    async def _refresh_after_action(self) -> None:
+        """Request a bounded state refresh after a control write.
+
+        The cloud stream does not always push fresh config/state frames after a
+        successful write. Asking for the small set of relevant characteristics
+        keeps HA readback aligned without reopening the session.
+        """
+        await _sleep_briefly(0.6)
+        for cmd_id in (0x0068, 0x0324):
+            try:
+                await self.request_data(cmd_id)
+                await _sleep_briefly(0.2)
+            except Exception:
+                LOGGER.debug("Post-action refresh for cmd 0x%04x failed", cmd_id, exc_info=True)
+
+    async def _refresh_characteristics(self, *cmd_ids: int) -> None:
+        """Request a bounded refresh for specific characteristics."""
+        await _sleep_briefly(0.6)
+        for cmd_id in cmd_ids:
+            try:
+                await self.request_data(cmd_id)
+                await _sleep_briefly(0.2)
+            except Exception:
+                LOGGER.debug(
+                    "Post-action refresh for cmd 0x%04x failed",
+                    cmd_id,
+                    exc_info=True,
+                )
+
+    async def _send_padded_write(self, cmd_id: int, payload: bytes, *, refresh_cmd_ids: tuple[int, ...] = (0x0068, 0x0324)) -> None:
+        """Send a write-style command with the Halo app's padded 17-byte payload body."""
+        if len(payload) > 17:
+            raise ValueError(f"Payload too long for cmd 0x{cmd_id:04x}: {len(payload)} > 17")
+        command = bytes([0x03]) + struct.pack("<H", cmd_id) + payload.ljust(17, b"\x00")
         await self.send_command(command)
+        if refresh_cmd_ids:
+            await self._refresh_characteristics(*refresh_cmd_ids)
+
+    async def send_action(self, action: int, value: int = 0) -> None:
+        """Send a chlorinator action command.
+
+        The protocol overloads the integer field depending on action type:
+        - normal mode/speed actions: unused (0)
+        - acid dosing holds: minutes
+        - equipment actions: target id
+        """
+        payload = struct.pack("<Bi12x", action, value)
+        command = bytes([0x03]) + struct.pack("<H", ACTION_CMD_ID) + payload
+        await self.send_command(command)
+        await self._refresh_after_action()
+
+    async def set_light_mode(self, mode: str) -> None:
+        """Set light mode using the app-confirmed 0x01F5 path."""
+        action = {value: key for key, value in LIGHT_MODES.items()}.get(mode)
+        if action is None:
+            raise ValueError(f"Invalid light mode: {mode}")
+        await self._send_padded_write(LIGHT_CMD_ID, bytes([action]))
+        self.data.light_mode = mode
+
+    async def set_equipment_mode(self, target_id: int, mode: str) -> None:
+        """Set a generic equipment target using the 0x01F4 action path."""
+        action = {value: key for key, value in ACTION_MODES.items()}.get(mode)
+        if action is None:
+            raise ValueError(f"Invalid equipment mode: {mode}")
+        await self.send_action(action, target_id)
+        if target_id == BLADE_TARGET_ID:
+            self.data.blade_mode = mode
+        elif target_id == JETS_TARGET_ID:
+            self.data.jets_mode = mode
+
+    async def set_blade_mode(self, mode: str) -> None:
+        await self.set_equipment_mode(BLADE_TARGET_ID, mode)
+
+    async def set_jets_mode(self, mode: str) -> None:
+        await self.set_equipment_mode(JETS_TARGET_ID, mode)
+
+    async def set_heater_off(self) -> None:
+        await self._send_padded_write(HEATER_CMD_ID, b"\x04", refresh_cmd_ids=(0x0068, 0x044E))
+        self.data.heater_mode = "Off"
+        self.data.heater_on = False
+
+    async def set_heater_on(self) -> None:
+        await self._send_padded_write(HEATER_CMD_ID, b"\x05", refresh_cmd_ids=(0x0068, 0x044E))
+        self.data.heater_mode = "On"
+        self.data.heater_on = True
+
+    async def increase_heater_setpoint(self) -> None:
+        await self._send_padded_write(HEATER_CMD_ID, b"\x06", refresh_cmd_ids=(0x0068, 0x044E))
+        if self.data.heater_setpoint_c is not None:
+            self.data.heater_setpoint_c = min(self.data.heater_setpoint_c + 1, 45)
+
+    async def decrease_heater_setpoint(self) -> None:
+        await self._send_padded_write(HEATER_CMD_ID, b"\x07", refresh_cmd_ids=(0x0068, 0x044E))
+        if self.data.heater_setpoint_c is not None:
+            self.data.heater_setpoint_c = max(self.data.heater_setpoint_c - 1, 10)
+
+    async def sync_controller_clock(self, when: datetime.datetime | None = None) -> None:
+        """Sync the controller date and time using the app-confirmed writes."""
+        local_now = when.astimezone() if when is not None else datetime.datetime.now().astimezone()
+        time_payload = bytes(
+            [
+                local_now.second,
+                local_now.minute,
+                local_now.hour,
+                local_now.isoweekday(),
+            ]
+        )
+        date_payload = bytes(
+            [
+                local_now.day,
+                local_now.month,
+                local_now.year % 100,
+            ]
+        )
+        await self._send_padded_write(TIME_CMD_ID, time_payload, refresh_cmd_ids=())
+        await _sleep_briefly(0.2)
+        await self._send_padded_write(DATE_CMD_ID, date_payload, refresh_cmd_ids=(0x0068,))
 
     async def set_mode_off(self) -> None:
         await self.send_action(1)
+        self.data.mode = "Off"
+        self.data.info_message = "Off"
 
     async def set_mode_auto(self) -> None:
         await self.send_action(2)
+        self.data.mode = "Auto"
 
     async def set_mode_manual(self) -> None:
         await self.send_action(3)
+        self.data.mode = "On"
 
     async def set_pump_speed_low(self) -> None:
         await self.send_action(4)
+        self.data.mode = "On"
+        self.data.pump_speed = "Low"
 
     async def set_pump_speed_medium(self) -> None:
         await self.send_action(5)
+        self.data.mode = "On"
+        self.data.pump_speed = "Medium"
 
     async def set_pump_speed_high(self) -> None:
         await self.send_action(6)
+        self.data.mode = "On"
+        self.data.pump_speed = "High"
 
     async def select_pool(self) -> None:
         await self.send_action(7)
@@ -743,11 +847,17 @@ class HaloWebSocketClient:
     async def disable_acid_dosing(self, minutes: int = 0) -> None:
         if minutes > 0:
             await self.send_action(11, minutes)
+            self.data.acid_dosing_state = "OffForPeriod"
+            self.data.acid_dosing_hold_minutes = minutes
         else:
             await self.send_action(10)
+            self.data.acid_dosing_state = "OffIndefinitely"
+            self.data.acid_dosing_hold_minutes = None
 
     async def enable_acid_dosing(self) -> None:
         await self.send_action(11, 0)
+        self.data.acid_dosing_state = "ResumeNow"
+        self.data.acid_dosing_hold_minutes = 0
 
     def _require_known_setpoint_value(self, name: str, value: Optional[int | float]) -> int | float:
         if value is None:
@@ -947,18 +1057,31 @@ class HaloWebSocketClient:
             }
             self.data.error_message = error_codes.get(
                 error_code,
-                f"Error({error_code})" if error_code != 0 else "NoError",
+                "UnknownError" if error_code != 0 else "NoError",
             )
             info_code = parsed.get("info_message_code", -1)
             if info_code == 0:
                 self.data.mode = "Off"
-            elif info_code in (2, 3):
-                self.data.mode = "Auto"
             elif info_code == 5:
+                # Standby — system is in Auto but idle between timer runs
                 self.data.mode = "Auto"
-            elif info_code >= 1:
+            elif info_code in (1, 15):
+                # Plain Sanitising and LowSpeedNoChlorinating are the closest
+                # observable manual-running states we currently have.
+                self.data.mode = "On"
+            elif info_code in (2, 3, 4, 8, 9, 10, 16, 17, 18, 19):
                 self.data.mode = "Auto"
             self.data.pump_is_operating = info_code not in (0, 5, None)
+
+            # Some pump-speed transitions are only visible in the state info
+            # text even when the config frame lags behind. Keep the explicit
+            # config-derived speed when we have it, but fill obvious gaps.
+            if info_code == 15:
+                self.data.pump_speed = "Low"
+            elif parsed.get("ai_mode_active") and (
+                self.data.mode == "Auto" or self.data.pump_speed not in {"Low", "Medium", "High"}
+            ):
+                self.data.pump_speed = "AI"
         elif parsed.get("type") == "config":
             if parsed.get("pump_speed") is not None:
                 self.data.pump_speed = parsed["pump_speed"]
@@ -989,3 +1112,67 @@ class HaloWebSocketClient:
             self.data.heater_water_temp_c = parsed.get("heater_water_temp_c")
             self.data.heater_on = parsed.get("heater_on", False)
             self.data.heater_error = parsed.get("heater_error")
+        elif parsed.get("type") == "controller_time":
+            controller_date = self.data.controller_datetime.date() if self.data.controller_datetime else None
+            try:
+                if controller_date is not None:
+                    tzinfo = datetime.datetime.now().astimezone().tzinfo
+                    self.data.controller_datetime = datetime.datetime(
+                        controller_date.year,
+                        controller_date.month,
+                        controller_date.day,
+                        parsed.get("controller_hour", 0),
+                        parsed.get("controller_minute", 0),
+                        parsed.get("controller_second", 0),
+                        tzinfo=tzinfo,
+                    )
+                self.data.controller_weekday = parsed.get("controller_weekday")
+            except ValueError:
+                LOGGER.debug("Ignoring invalid controller time payload", exc_info=True)
+        elif parsed.get("type") == "controller_date":
+            existing = self.data.controller_datetime
+            try:
+                tzinfo = datetime.datetime.now().astimezone().tzinfo
+                self.data.controller_datetime = datetime.datetime(
+                    parsed.get("controller_year", 2000),
+                    parsed.get("controller_month", 1),
+                    parsed.get("controller_day", 1),
+                    existing.hour if existing else 0,
+                    existing.minute if existing else 0,
+                    existing.second if existing else 0,
+                    tzinfo=tzinfo,
+                )
+            except ValueError:
+                LOGGER.debug("Ignoring invalid controller date payload", exc_info=True)
+        elif parsed.get("type") == "timer_capabilities":
+            self.data.equipment_timer_slots = parsed.get("equipment_timer_slots")
+            self.data.lighting_timer_slots = parsed.get("lighting_timer_slots")
+            self.data.timer_capability_flags = parsed.get("flags", [])
+        elif parsed.get("type") == "timer_setup":
+            season = parsed.get("season")
+            if season is not None:
+                self.data.timer_season = season
+                self.data.timer_season_source = "setup"
+        elif parsed.get("type") == "timer_state":
+            self.data.timer_profile_index = parsed.get("profile_index")
+            season = parsed.get("season")
+            if season is not None:
+                self.data.timer_season = season
+                self.data.timer_season_source = "state"
+        elif parsed.get("type") == "timer_config":
+            slot_index = parsed.get("slot_index")
+            if slot_index is not None:
+                self.data.timer_configs[int(slot_index)] = {
+                    "slot_index": parsed.get("slot_index"),
+                    "active": parsed.get("active"),
+                    "equipment_flags": parsed.get("equipment_flags"),
+                    "equipment_enabled": parsed.get("equipment_enabled", []),
+                    "has_base_timer_flag": parsed.get("has_base_timer_flag"),
+                    "unknown_equipment_flags": parsed.get("unknown_equipment_flags", []),
+                    "start_time": parsed.get("start_time"),
+                    "stop_time": parsed.get("stop_time"),
+                    "duration_minutes": parsed.get("duration_minutes"),
+                    "overnight": parsed.get("overnight"),
+                    "speed": parsed.get("speed"),
+                    "speed_code": parsed.get("speed_code"),
+                }

@@ -1,8 +1,8 @@
 """Config flow for the AstralPool Halo Cloud integration.
 
-Two setup paths:
+Normal setup path:
 
-1. BLE Discovery (recommended for new users):
+1. BLE Discovery / Pairing:
    - HA auto-discovers "HCHLOR" BLE devices
    - User puts chlorinator in pairing mode
    - Access code is read from BLE advertisement
@@ -11,10 +11,9 @@ Two setup paths:
    - Cloud credentials stored — BLE never needed again
    - User confirms the HA device name and optional area before entry creation
 
-2. Manual Entry (for users who already have credentials):
-   - User enters serial number + username + password directly
-   - Credentials are verified against the cloud
-   - User confirms the HA device name and optional area before entry creation
+A manual credential step still exists in code as a fallback/debug path for cases
+where credentials are already known, but it is intentionally hidden from the
+normal user flow because most users cannot obtain the cloud password directly.
 """
 
 from __future__ import annotations
@@ -232,20 +231,11 @@ class AstralPoolHaloCloudConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_ble_pair_failed(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Handle pairing failure — offer retry or manual entry."""
+        """Handle pairing failure by offering a clean retry."""
         if user_input is not None:
-            if user_input.get("use_manual", False):
-                return await self.async_step_manual()
             return await self.async_step_ble_pair()
 
-        return self.async_show_form(
-            step_id="ble_pair_failed",
-            data_schema=vol.Schema(
-                {
-                    vol.Optional("use_manual", default=False): bool,
-                }
-            ),
-        )
+        return self.async_show_form(step_id="ble_pair_failed")
 
     # =================================================================
     # Path 2: Manual Entry
@@ -254,11 +244,12 @@ class AstralPoolHaloCloudConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, str] | None = None
     ) -> FlowResult:
-        """Offer the user a setup method choice."""
-        return self.async_show_menu(
-            step_id="user",
-            menu_options=["ble_discovery", "manual"],
-        )
+        """Start the normal user flow with BLE discovery.
+
+        Manual credential entry remains available as a hidden fallback/debug
+        step, but is not exposed in the standard onboarding flow.
+        """
+        return await self.async_step_ble_discovery()
 
     async def async_step_ble_discovery(
         self, user_input: dict[str, Any] | None = None
@@ -303,18 +294,9 @@ class AstralPoolHaloCloudConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         """Handle BLE discovery timeout for user-initiated setup."""
         if user_input is not None:
-            if user_input.get("use_manual", False):
-                return await self.async_step_manual()
             return await self.async_step_ble_discovery()
 
-        return self.async_show_form(
-            step_id="ble_discovery_timeout",
-            data_schema=vol.Schema(
-                {
-                    vol.Optional("use_manual", default=False): bool,
-                }
-            ),
-        )
+        return self.async_show_form(step_id="ble_discovery_timeout")
 
     async def async_step_manual(
         self, user_input: dict[str, str] | None = None

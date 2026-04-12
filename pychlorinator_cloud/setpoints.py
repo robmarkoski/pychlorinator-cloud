@@ -21,11 +21,13 @@ from typing import Final
 
 SETPOINT_CMD_ID: Final[int] = 0x0066
 
-PH_SETPOINT_MIN: Final[float] = 7.2
-PH_SETPOINT_MAX: Final[float] = 7.6
+# Rob confirmed on real hardware that the controller accepts a broader range
+# than the initial conservative documentation-based bounds.
+PH_SETPOINT_MIN: Final[float] = 6.8
+PH_SETPOINT_MAX: Final[float] = 10.0
 PH_SETPOINT_STEP: Final[float] = 0.1
 
-ORP_SETPOINT_MIN_MV: Final[int] = 650
+ORP_SETPOINT_MIN_MV: Final[int] = 200
 ORP_SETPOINT_MAX_MV: Final[int] = 800
 
 
@@ -101,4 +103,4 @@ def build_setpoint_payload(
 
 def build_setpoint_command(**kwargs: int | float) -> bytes:
     payload = build_setpoint_payload(**kwargs)
-    return bytes([0x01]) + struct.pack("<H", SETPOINT_CMD_ID) + payload
+    return bytes([0x03]) + struct.pack("<H", SETPOINT_CMD_ID) + payload

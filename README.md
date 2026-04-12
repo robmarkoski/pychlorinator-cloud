@@ -1,239 +1,266 @@
 # AstralPool Halo Cloud
 
+<p align="center">
+  <img src="docs/branding/logo-final.png" alt="AstralPool Halo Cloud logo" width="180">
+</p>
+
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://hacs.xyz/)
 [![Home Assistant Custom Integration](https://img.shields.io/badge/Home%20Assistant-Custom%20Integration-41BDF5.svg)](https://www.home-assistant.io/)
 
-A Home Assistant custom integration for AstralPool Halo chlorinators that uses the cloud connection rather than BLE for normal operation.
+A Home Assistant custom integration, plus its supporting Python client library, for **AstralPool Halo chlorinators** using the **vendor cloud connection** for normal operation instead of BLE.
 
 > [!WARNING]
-> This project is unofficial, reverse-engineered software.
-> It is under **heavy development**, carries **no warranty**, and things may break until the release is properly locked in.
-> It is **not for production use yet**.
+> **DEEP DEVELOPMENT WARNING**
+>
+> This project is **unofficial**, **reverse-engineered**, and still under **deep active development**.
+> It is **not production-ready** and should **not be relied on for production pool operation**.
+>
 > It is not affiliated with AstralPool, Astral, Fluidra, or Astral Labs.
-> Use at your own risk.
+> Use it at your own risk.
+>
+> In particular, BLE onboarding, broader equipment control, timer workflows, and some write paths still need more real-world validation.
 
-> [!IMPORTANT]
-> Most of the core integration works, but some controls are still incomplete or not fully locked down yet.
-> Check the control-status section below before assuming a feature is release-ready.
+## What this project is
+
+This repository contains two closely related pieces:
+
+- a **Home Assistant custom integration** for day-to-day use
+- a **Python client library** (`pychlorinator_cloud`) that speaks the Halo cloud protocol
+
+The goal is simple: expose Halo cloud data in Home Assistant without relying on BLE for ongoing operation.
 
 ## Why this exists
 
-I built this because the BLE-only options were not a great fit for my setup.
-I wanted a cloud-first integration without the normal BLE range and proxy limitations, and my BLE proxy location was far enough away that I could not rely on it staying connected consistently.
-That is why this project exists.
+Existing Halo integrations are mostly BLE-centric. That can work well, but it is not always a good fit if:
 
-If you want something more established today and BLE already works well in your environment, look at:
+- your chlorinator is a poor match for BLE range or signal reliability
+- you do not want to depend on an ESPHome/BLE proxy
+- you want the integration to use the same cloud path the vendor app uses
+
+If BLE already works well in your setup and you want a more established option today, also look at:
 
 - [`astralpool_halo_chlorinator`](https://github.com/DanielNagy/astralpool_halo_chlorinator)
 - [`astralpool_chlorinator`](https://github.com/pbutterworth/astralpool_chlorinator)
 
-If one of those already does what you need and just works, use it and forget you ever saw this one.
+## Current status
 
-## What it does
+The integration already provides useful read-only coverage and a limited set of cloud controls, but it should still be treated as **beta / preview** rather than a finished stable release.
 
-This integration exposes Halo cloud data in Home Assistant, including:
+### Solid today
 
-- operating mode and pump speed
-- pH and ORP readings
-- chlorine, pH, timer, and error/status messages
-- water temperature and heater state
-- setpoints and device diagnostics
-- cloud connectivity and operating-state binary sensors
+- cloud connection and live updates
+- core telemetry and operating state
+- Home Assistant config flow
+- Home Assistant entities for status, diagnostics, and a conservative control surface
+- main mode control: **Off**, **Auto**, **On**
+- pH and ORP setpoint number entities in Home Assistant
+- manual pump speed control, with working writes and conservative readback handling
+- app-confirmed control paths for heater, light, Blade, Jets, acid-dosing holds, and controller time sync are now mapped in the local working copy
+
+### Still not fully locked down
+
+- release-quality BLE onboarding across more real-world setups
+- broader write support for heater, lighting, valves, and other equipment functions
+- wider real-world validation of setpoint and equipment writes
+- timer and equipment-control workflows
 
 ## Installation
 
 ### HACS
 
-1. Open HACS.
+1. Open **HACS**.
 2. Add a **Custom repository**.
-3. Use repository URL: `https://github.com/robmarkoski/pychlorinator-cloud`
+3. Repository URL: `https://github.com/robmarkoski/pychlorinator-cloud`
 4. Category: **Integration**
 5. Install the repository.
 6. Restart Home Assistant.
 7. Go to **Settings -> Devices & Services**.
 8. Add **AstralPool Halo Cloud**.
 
-## Configuration
+### Requirements
 
-The integration currently supports two setup paths:
+For normal onboarding, Home Assistant needs a working Bluetooth path to discover and pair with the chlorinator.
 
-| Setup path | Use case | Notes |
+After setup, the integration uses the **cloud connection for normal operation**. BLE is primarily needed to obtain cloud credentials during pairing.
+
+## Setup and onboarding
+
+### Normal setup path
+
+The intended user flow is:
+
+1. Home Assistant discovers the Halo chlorinator over BLE
+2. you confirm the device and start pairing
+3. Home Assistant retrieves the generated cloud credentials
+4. you choose the Home Assistant device name and optional area
+5. the integration connects over the cloud and creates entities
+
+### Manual credential path
+
+A manual cloud-credential path still exists as a hidden fallback/debug path for cases where credentials are already known, but it is **not** the normal onboarding flow.
+
+## Capability matrix
+
+This table is intentionally conservative.
+
+| Area | Status | Notes |
 |---|---|---|
-| Manual cloud credentials | Fastest and most predictable setup path | Best for current install/testing |
-| BLE pairing / discovery | Preferred long-term onboarding path | Important before a full 1.0 release claim |
+| Cloud connection and live updates | Working | Main operating path |
+| Core status and measurement sensors | Working | pH, ORP, temperatures, mode, pump state, messages, diagnostics |
+| Binary sensors for operating and fault state | Working | Includes connectivity, no-flow, salt, sanitising, standby, etc. |
+| System mode select | Working | `Off`, `Auto`, `On` |
+| Pump speed select | Working, still conservative | Writes are working, but readback remains inference-based in some transitions |
+| pH / ORP setpoint controls | Working, still conservative | Exposed as Home Assistant number entities with bounded validation |
+| BLE pairing-based onboarding | Functional but still being hardened | Not yet something I would overclaim as fully proven across all setups |
+| Pool/spa selection control | Not currently exposed | Read state exists, control is not presented as a Home Assistant entity today |
+| Heater control | Working locally, still under live validation | On/off and stepwise setpoint changes are app-confirmed |
+| Light, Blade, Jets, auxiliary equipment controls | Working locally, still conservative | App-confirmed write paths mapped, optional entities should stay user-enabled rather than assumed present |
+| Acid dosing hold controls | Working locally, still conservative | Resume now, indefinite hold, and app preset timed holds are mapped |
+| Controller time sync | Working locally, still conservative | Uses app-confirmed date/time writes |
+| Timer and schedule control | Not release-ready | Not part of the normal HA surface |
 
-During setup you can also choose a device name and optional Home Assistant area.
+## Entity overview
 
-## Entity naming convention
+Entity IDs use the configured Home Assistant device name.
 
-Entity IDs depend on the configured device name chosen during setup.
+- default device name: `Halo <serial>`
+- device slug: `slugify(device_name)`
+- entity ID pattern: `<platform>.<device_slug>_<entity_key>`
 
-| Item | Rule |
-|---|---|
-| Device name default | `Halo <serial>` |
-| Device slug | `slugify(device_name)` |
-| Object ID pattern | `<device_slug>_<entity_key>` |
-| Entity ID pattern | `<platform>.<device_slug>_<entity_key>` |
-| Area | Used for placement only, not entity IDs |
-
-Example, if the configured device name is **Pool Chlorinator**, the device slug becomes `pool_chlorinator` and entity IDs will look like:
+Example, if the configured device name is **Pool Chlorinator**:
 
 - `sensor.pool_chlorinator_mode`
 - `binary_sensor.pool_chlorinator_low_salt`
 - `select.pool_chlorinator_mode_select`
 
-## Current control status
+### Select entities
 
-The checklist below is intentionally conservative. It reflects what is currently known to work, what is still incomplete, and what is planned for the timer-focused 2.0 milestone.
+| Entity | Default entity ID | Purpose |
+|---|---|---|
+| System Mode | `select.<device_slug>_mode_select` | Main operating mode |
+| Pump Speed Control | `select.<device_slug>_pump_speed_select` | Manual pump speed selection |
+| Heater Mode Control | `select.<device_slug>_heater_mode_select` | Heater on/off |
+| Acid Dosing Hold | `select.<device_slug>_acid_dosing_select` | Resume now, indefinite hold, and preset timed holds, default-disabled until you choose to expose it |
 
-### Manual controls working now
+Optional-by-default selects, enabled manually if your hardware actually has them:
 
-- [x] Connect to the chlorinator over the cloud
-- [x] Read live state, measurements, setpoints, and status messages
-- [x] Set main operating mode to **Off**
-- [x] Set main operating mode to **Auto**
-- [x] Force sanitising/manual run **On**
-- [x] Select pump speed **High**
-- [x] Expose manual control/select entities in Home Assistant for supported mode changes
+| Entity | Default entity ID | Purpose |
+|---|---|---|
+| Light Mode | `select.<device_slug>_light_mode_select` | Light off/on/auto |
+| Blade Mode | `select.<device_slug>_blade_mode_select` | Auxiliary equipment target id 6 |
+| Jets Mode | `select.<device_slug>_jets_mode_select` | Auxiliary equipment target id 7 |
 
-### Manual controls partially implemented or not fully locked down yet
+### Number entities
 
-- [ ] Confirm manual pump speed **Low** end-to-end on hardware
-- [ ] Confirm manual pump speed **Medium** end-to-end on hardware
-- [ ] Re-validate Pool/Spa selection end-to-end on hardware
-- [ ] Expose and validate safe pH setpoint writes in the main Home Assistant UX
-- [ ] Expose and validate safe ORP setpoint writes in the main Home Assistant UX
+| Entity | Default entity ID | Purpose |
+|---|---|---|
+| pH Setpoint | `number.<device_slug>_ph_setpoint_control` | Adjust pH target |
+| ORP Setpoint | `number.<device_slug>_orp_setpoint_control` | Adjust ORP target |
 
-### Manual controls not working yet / not release-ready yet
+### Button entities
 
-- [ ] Heater **On/Off** control locked down
-- [ ] Light **On/Off** control locked down
-- [ ] Valve / auxiliary manual controls (for example Blade / Jets) locked down
-- [ ] Solar / equipment manual controls locked down
-- [ ] Release-quality BLE pairing/onboarding locked down
-
-### Planned for 2.0 release
-
-The planned **2.0** milestone is the timer/equipment-control release.
-
-- [ ] Equipment timer system working end-to-end
-- [ ] Summer / Winter timer profile handling working end-to-end
-- [ ] Lighting timer system working end-to-end
-- [ ] Heat Demand timer/system working end-to-end
-- [ ] Safe timer writes exposed in Home Assistant
-- [ ] Timer-related equipment control polished and release-ready
-
-## Entities
-
-The tables below show the main entities exposed by the integration. Default entity IDs use `<device_slug>` to indicate the configured system/device name slug.
-
-### Selects
-
-| Name | Default entity ID | Unit | Description |
-|---|---|---:|---|
-| Mode | `select.<device_slug>_mode_select` | — | Main operating mode selector |
-| Pool/Spa | `select.<device_slug>_pool_spa_select` | — | Pool or spa selection |
+| Entity | Default entity ID | Purpose |
+|---|---|---|
+| Sync Controller Time | `button.<device_slug>_sync_controller_time` | Sync date/time from Home Assistant host |
+| Heater Setpoint Up | `button.<device_slug>_heater_setpoint_up` | Raise heater setpoint by 1°C |
+| Heater Setpoint Down | `button.<device_slug>_heater_setpoint_down` | Lower heater setpoint by 1°C |
 
 ### Core sensors
 
-| Name | Default entity ID | Unit | Description |
-|---|---|---:|---|
-| Mode | `sensor.<device_slug>_mode` | — | Current chlorinator operating mode |
-| Pump Speed | `sensor.<device_slug>_pump_speed` | — | Current pump speed |
-| pH | `sensor.<device_slug>_ph_measurement` | pH | Live pH reading |
-| ORP Measurement | `sensor.<device_slug>_orp_measurement` | mV | Live ORP reading |
-| Chlorine Status | `sensor.<device_slug>_chlorine_status` | — | Human-readable chlorine status |
-| pH Status | `sensor.<device_slug>_ph_status` | — | Human-readable pH status |
-| Info Message | `sensor.<device_slug>_info_message` | — | Main operating/status text |
-| Error Message | `sensor.<device_slug>_error_message` | — | Main error/status code as text |
-| Timer Info | `sensor.<device_slug>_timer_info` | — | Timer-related status text |
-| Water Temperature | `sensor.<device_slug>_water_temperature` | °C | Primary water temperature |
-| pH Setpoint | `sensor.<device_slug>_ph_setpoint` | pH | Target pH setpoint |
-| ORP Setpoint | `sensor.<device_slug>_orp_setpoint` | mV | Target ORP setpoint |
-| Pool Chlorine Setpoint | `sensor.<device_slug>_pool_chlorine_setpoint` | — | Pool chlorine target |
-| Acid Setpoint | `sensor.<device_slug>_acid_setpoint` | — | Acid dosing target |
-| Spa Chlorine Setpoint | `sensor.<device_slug>_spa_chlorine_setpoint` | — | Spa chlorine target |
-| Heater Mode | `sensor.<device_slug>_heater_mode` | — | Heater on/off mode |
-| Heater Pump Mode | `sensor.<device_slug>_heater_pump_mode` | — | Heater pump mode |
-| Heater Setpoint | `sensor.<device_slug>_heater_setpoint` | °C | Heater target temperature |
-| Heat Pump Mode | `sensor.<device_slug>_heat_pump_mode` | — | Heat pump operating mode |
-| Heater Water Temperature | `sensor.<device_slug>_heater_water_temperature` | °C | Heater-reported water temperature |
-
-### Diagnostic sensors
-
-| Name | Default entity ID | Unit | Description | Notes |
-|---|---|---:|---|---|
-| Water Temperature Precise | `sensor.<device_slug>_water_temperature_precise` | °C | Higher-precision water temperature | Diagnostic |
-| Cell Level | `sensor.<device_slug>_cell_level` | — | Cell output level | Diagnostic |
-| Cell Current | `sensor.<device_slug>_cell_current` | mA | Cell current draw | Diagnostic |
-| pH Control Type | `sensor.<device_slug>_ph_control_type` | — | pH control mode | Diagnostic |
-| ORP Control Type | `sensor.<device_slug>_orp_control_type` | — | ORP control mode | Diagnostic |
-| Access Level | `sensor.<device_slug>_access_level` | — | Cloud access level | Diagnostic |
-| Protocol Version | `sensor.<device_slug>_protocol_version` | — | Reported cloud protocol version | Diagnostic |
-| Last Update | `sensor.<device_slug>_last_update` | — | Timestamp of last update | Disabled by default |
-| Board Temperature | `sensor.<device_slug>_board_temperature` | °C | Controller board temperature | Diagnostic |
-| Pool Volume | `sensor.<device_slug>_pool_volume` | L | Configured pool volume | Diagnostic |
-| Litres Left to Filter | `sensor.<device_slug>_litres_left_to_filter` | L | Remaining filtration volume estimate | Diagnostic |
-| Heater Error | `sensor.<device_slug>_heater_error` | — | Raw heater error value | Diagnostic |
-| Salt/Error Code | `sensor.<device_slug>_salt_error_raw` | — | Raw salt/error code field | Disabled by default |
+| Entity | Default entity ID |
+|---|---|
+| System Mode | `sensor.<device_slug>_mode` |
+| Pump Speed | `sensor.<device_slug>_pump_speed` |
+| pH | `sensor.<device_slug>_ph_measurement` |
+| ORP Measurement | `sensor.<device_slug>_orp_measurement` |
+| Chlorine Status | `sensor.<device_slug>_chlorine_status` |
+| pH Status | `sensor.<device_slug>_ph_status` |
+| Info Message | `sensor.<device_slug>_info_message` |
+| Error Message | `sensor.<device_slug>_error_message` |
+| Water Temperature | `sensor.<device_slug>_water_temperature` |
+| Heater Mode | `sensor.<device_slug>_heater_mode` |
+| Heater Setpoint | `sensor.<device_slug>_heater_setpoint` |
+| Heater Water Temperature | `sensor.<device_slug>_heater_water_temperature` |
 
 ### Binary sensors
 
-| Name | Default entity ID | Type | Description | Notes |
-|---|---|---|---|---|
-| Cloud Connected | `binary_sensor.<device_slug>_connected` | Diagnostic | Cloud connection state | Connectivity |
-| Pump Operating | `binary_sensor.<device_slug>_pump_operating` | Status | Pump currently operating | Running state |
-| Cell Operating | `binary_sensor.<device_slug>_cell_operating` | Status | Cell currently operating | Running state |
-| Cell Reversed | `binary_sensor.<device_slug>_cell_reversed` | Diagnostic | Cell polarity reversed | Diagnostic |
-| Cell Reversing | `binary_sensor.<device_slug>_cell_reversing` | Diagnostic | Cell currently reversing | Diagnostic |
-| Cooling Fan | `binary_sensor.<device_slug>_cooling_fan_on` | Diagnostic | Cooling fan active | Diagnostic |
-| Dosing Pump | `binary_sensor.<device_slug>_dosing_pump_on` | Status | Dosing pump active | Running state |
-| AI Mode Active | `binary_sensor.<device_slug>_ai_mode_active` | Diagnostic | AI mode flag active | Diagnostic |
-| Spa Selected | `binary_sensor.<device_slug>_spa_selection` | Diagnostic | Spa mode selected | Diagnostic |
-| Heater On | `binary_sensor.<device_slug>_heater_on` | Status | Heater currently on | Heat state |
-| No Flow | `binary_sensor.<device_slug>_no_flow` | Diagnostic | No-flow condition detected | Diagnostic |
-| Low Salt | `binary_sensor.<device_slug>_low_salt` | Diagnostic | Low-salt condition detected | Diagnostic |
-| High Salt | `binary_sensor.<device_slug>_high_salt` | Diagnostic | High-salt condition detected | Diagnostic |
-| Sampling Only | `binary_sensor.<device_slug>_sampling_only` | Diagnostic | Sampling-only condition active | Diagnostic |
-| Dosing Disabled | `binary_sensor.<device_slug>_dosing_disabled` | Diagnostic | Dosing disabled state | Diagnostic |
-| Daily Acid Dose Limit Reached | `binary_sensor.<device_slug>_daily_acid_dose_limit_reached` | Diagnostic | Daily acid-dose limit reached | Diagnostic |
-| Cell Disabled | `binary_sensor.<device_slug>_cell_disabled` | Diagnostic | Cell disabled state | Diagnostic |
-| Sanitising Active | `binary_sensor.<device_slug>_sanitising_active` | Status | Sanitising mode active | Operating state |
-| Filtering Only | `binary_sensor.<device_slug>_filtering_only` | Status | Filtering without sanitising | Operating state |
-| Sampling Active | `binary_sensor.<device_slug>_sampling_active` | Status | Sampling mode active | Operating state |
-| Standby | `binary_sensor.<device_slug>_standby` | Status | Standby state active | Operating state |
-| Low Speed No Chlorinating | `binary_sensor.<device_slug>_low_speed_no_chlorinating` | Status | Low-speed no-chlorination state | Operating state |
-| Reduced Output Low Temperature | `binary_sensor.<device_slug>_reduced_output_low_temperature` | Status | Reduced output due to low temperature | Operating state |
-| Heater Cooldown Active | `binary_sensor.<device_slug>_heater_cooldown_active` | Status | Heater cooldown in progress | Operating state |
-| Manual Acid Dose Active | `binary_sensor.<device_slug>_manual_acid_dose_active` | Status | Manual acid dosing active | Operating state |
-| Backwashing | `binary_sensor.<device_slug>_backwashing` | Status | Backwash state active | Operating state |
+| Entity | Default entity ID |
+|---|---|
+| Cloud Connected | `binary_sensor.<device_slug>_connected` |
+| Pump Operating | `binary_sensor.<device_slug>_pump_operating` |
+| Cell Operating | `binary_sensor.<device_slug>_cell_operating` |
+| Heater On | `binary_sensor.<device_slug>_heater_on` |
+| No Flow | `binary_sensor.<device_slug>_no_flow` |
+| Low Salt | `binary_sensor.<device_slug>_low_salt` |
+| High Salt | `binary_sensor.<device_slug>_high_salt` |
+| Sanitising Active | `binary_sensor.<device_slug>_sanitising_active` |
+| Filtering Only | `binary_sensor.<device_slug>_filtering_only` |
+| Sampling Active | `binary_sensor.<device_slug>_sampling_active` |
+| Standby | `binary_sensor.<device_slug>_standby` |
+| Manual Acid Dose Active | `binary_sensor.<device_slug>_manual_acid_dose_active` |
+| Backwashing | `binary_sensor.<device_slug>_backwashing` |
+
+### Additional diagnostics
+
+The integration also exposes a larger set of diagnostic entities, including:
+
+- precise water temperature
+- cell current and cell level
+- pH / ORP control type
+- pH / ORP / chlorine / acid setpoint readbacks
+- access level and protocol version
+- board temperature and pool volume
+- raw salt/error code and heater error
+
+Some of these are **disabled by default** in Home Assistant because they are primarily diagnostic.
+
+## Notes and limitations
+
+- Halo cloud access can contend with BLE or app access. In practice, the device behaves much better when only one control path is active at a time.
+- This is still a reverse-engineered integration, so vendor-side changes could break parts of it.
+- BLE pairing is a key release-quality gate. Until that path is proven more broadly, this should be treated as preview/beta.
+- pH and ORP setpoints are exposed in Home Assistant, and newer app-confirmed controls are being surfaced conservatively. Optional accessories like lights or extra equipment should not be assumed present on every install.
+- Timer and equipment-control work is not yet part of the stable feature set and is mostly kept out of the default HA surface.
+- Confirmed cloud protocol version currently surfaced by the integration is `2.0`.
 
 ## Tested device
 
 | Item | Value |
 |---|---|
 | Tested model | AstralPool Halo Chlorinator |
-| Home Assistant device name used in testing | Pool Chlorinator |
-| Firmware currently running | Not currently surfaced/recorded cleanly by the integration yet |
-| Confirmed cloud protocol/build info | `2.0` |
+| Confirmed cloud protocol version | `2.0` |
+| Example Home Assistant device name used in testing | `Pool Chlorinator` |
 
-## Notes and limitations
+## Troubleshooting
 
-- The chlorinator only supports one active connection at a time, so cloud access can contend with BLE or app access.
-- This project is still under heavy development.
-- BLE pairing needs to be fully proven in real-world onboarding before a full 1.0 release claim.
-- Timer and equipment work is underway, but not yet part of the stable public feature set.
-- Exact chlorinator firmware version is not currently recorded in a clean user-facing way, so it is not claimed here.
-- Confirmed cloud protocol/build information currently indicates protocol `2.0`.
+### The chlorinator is not discovered during setup
 
-## Work in progress
+- Make sure Bluetooth is available to Home Assistant.
+- Make sure the chlorinator is advertising and can be put into pairing mode.
+- Try the initial pairing flow with the chlorinator physically closer to the Bluetooth adapter if possible.
 
-Current development focus includes:
+### The integration sets up, but cloud connectivity is unreliable
 
-- hardening BLE pairing for release-quality onboarding
-- timer decoding and safe timer support
-- continued Home Assistant polish and packaging improvements
+- Close the vendor app and stop any BLE polling or BLE-based integrations temporarily.
+- The chlorinator appears to dislike multiple active control paths at once.
+- If BLE is still connected, the cloud session may fail or behave inconsistently.
+
+### Some entities are missing
+
+- Check whether the entity is **disabled by default** in the entity registry.
+- Some sensors are intentionally diagnostic-only.
+- Some controls are not exposed yet because they are not sufficiently validated.
+
+### A control you expected is not available
+
+That is usually intentional at this stage. This repository prefers conservative exposure over offering controls that are not yet well validated on real hardware.
 
 ## Support
 
-If you hit a problem with the public HACS/install path, please use the GitHub issue tracker.
+If you run into a bug or install problem, please open an issue on GitHub with:
+
+- your Home Assistant version
+- integration version / branch
+- what setup path you used
+- relevant log snippets
+- whether BLE or the vendor app was also connected at the time

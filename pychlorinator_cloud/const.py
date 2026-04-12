@@ -10,10 +10,10 @@ STUN_SERVER_HOST: Final[str] = "13.211.222.74"
 STUN_SERVER_PORT: Final[int] = 3478
 
 SIGNALLING_WS_URL: Final[str] = (
-    "wss://halo.connectmypool.com.au/halo_p2p/signalling/version_0.6/app"
+    "wss://iot.connectmypool.com.au/halo_p2p/signalling/version_0.6/app"
 )
 SIGNALLING_REST_QUERY_URL: Final[str] = (
-    "https://halo.connectmypool.com.au/halo_p2p/signalling/version_0.6/app/query"
+    "https://iot.connectmypool.com.au/halo_p2p/signalling/version_0.6/app/query"
 )
 
 P2P_LOCAL_PORT_CLOUD: Final[int] = 64176

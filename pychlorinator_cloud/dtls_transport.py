@@ -59,7 +59,8 @@ class OpenSslDtlsTransport:
             "-cipher",
             self.cipher_string,
         ]
-        LOGGER.debug("Starting DTLS transport: %s", " ".join(cmd[:-3]) + " ...")
+        # Redact sensitive arguments (-psk <hex> ...) from debug logs
+        LOGGER.debug("Starting DTLS transport: %s ...", " ".join(cmd[:8]))
         try:
             self._process = await asyncio.create_subprocess_exec(
                 *cmd,

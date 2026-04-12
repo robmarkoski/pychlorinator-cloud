@@ -7,6 +7,7 @@ import logging
 import random
 from typing import Any
 
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import CALLBACK_TYPE, CoreState, HomeAssistant, callback
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
@@ -31,7 +32,7 @@ _JITTER_MAX_SECONDS = 15
 class HaloCloudCoordinator(DataUpdateCoordinator[ChlorinatorLiveData]):
     """Manage a persistent Halo cloud WebSocket connection."""
 
-    def __init__(self, hass: HomeAssistant, entry) -> None:
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         """Initialise the coordinator."""
         super().__init__(
             hass,

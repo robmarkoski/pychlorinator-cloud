@@ -2,12 +2,8 @@
   "config": {
     "step": {
       "user": {
-        "title": "Setup Method",
-        "description": "Choose how you want to set up your chlorinator.",
-        "menu_options": {
-          "ble_discovery": "BLE pairing / discovery",
-          "manual": "Manual cloud credentials"
-        }
+        "title": "BLE Pairing / Discovery",
+        "description": "Home Assistant will guide you through Bluetooth pairing to retrieve the cloud credentials needed for normal operation."
       },
       "ble_discovery": {
         "title": "BLE Pairing / Discovery",
@@ -15,10 +11,7 @@
       },
       "ble_discovery_timeout": {
         "title": "No Chlorinator Found",
-        "description": "No Halo chlorinator was found over Bluetooth in time. You can try BLE discovery again or switch to manual cloud credentials.",
-        "data": {
-          "use_manual": "Use manual cloud credentials instead"
-        }
+        "description": "No Halo chlorinator was found over Bluetooth in time. Check power, range, and Bluetooth availability, then try again."
       },
       "manual": {
         "title": "Manual Setup",
@@ -58,10 +51,7 @@
       },
       "ble_pair_failed": {
         "title": "Pairing Failed",
-        "description": "BLE pairing did not complete. You can retry or switch to manual credential entry.",
-        "data": {
-          "use_manual": "Enter credentials manually instead"
-        }
+        "description": "BLE pairing did not complete. Check that the chlorinator is still in pairing mode, then try again."
       }
     },
     "progress": {
@@ -72,7 +62,7 @@
       "cannot_connect": "Could not connect to the chlorinator. Check credentials and ensure the chlorinator is online.",
       "pairing_timeout": "Pairing timed out. Make sure the chlorinator is in pairing mode and nearby.",
       "pairing_failed": "BLE pairing failed. The chlorinator may have rejected the request.",
-      "bleak_not_installed": "BLE support is not available. Install bleak or use manual credential entry.",
+      "bleak_not_installed": "BLE support is not available. Install bleak and ensure Bluetooth is available in Home Assistant.",
       "username_too_long": "Username must be 14 characters or less.",
       "username_required": "Username is required.",
       "device_name_required": "Device name is required.",
