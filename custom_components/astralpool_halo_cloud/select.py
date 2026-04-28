@@ -67,8 +67,7 @@ LIGHT_COLOUR_SELECT_DESCRIPTION = HaloSelectEntityDescription(
     name="Light Colour",
     options=list(SLX_FLX_COLOURS.keys()),
     entity_registry_enabled_default=False,
-    # Write-only for now: state read for lighting colour is not yet wired.
-    value_fn=lambda data: None,
+    value_fn=lambda data: data.light_colour,
     command_fn=lambda client, option: client.set_light_colour(SLX_FLX_COLOURS[option]),
 )
 
