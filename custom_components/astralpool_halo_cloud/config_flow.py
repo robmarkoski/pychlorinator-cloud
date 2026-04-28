@@ -244,12 +244,33 @@ class AstralPoolHaloCloudConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, str] | None = None
     ) -> FlowResult:
-        """Start the normal user flow with BLE discovery.
+        """Choose between BLE pairing (default) and manual credential entry.
 
-        Manual credential entry remains available as a hidden fallback/debug
-        step, but is not exposed in the standard onboarding flow.
+        Manual credentials are useful when the chlorinator firmware requires
+        server-mediated pairing (Play Integrity / App Attest), which third-party
+        clients cannot perform. In that case credentials must be obtained
+        out-of-band from a successful pair via the official app.
         """
-        return await self.async_step_ble_discovery()
+        if user_input is not None:
+            if user_input.get("setup_method") == "manual":
+                return await self.async_step_manual()
+            return await self.async_step_ble_discovery()
+
+        return self.async_show_form(
+            step_id="user",
+            data_schema=vol.Schema(
+                {
+                    vol.Required("setup_method", default="ble"): selector(
+                        {
+                            "select": {
+                                "options": ["ble", "manual"],
+                                "translation_key": "setup_method",
+                            }
+                        }
+                    ),
+                }
+            ),
+        )
 
     async def async_step_ble_discovery(
         self, user_input: dict[str, Any] | None = None
