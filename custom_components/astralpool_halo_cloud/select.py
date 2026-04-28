@@ -44,6 +44,34 @@ LIGHT_SELECT_DESCRIPTION = HaloSelectEntityDescription(
     command_fn=lambda client, option: client.set_light_mode(option),
 )
 
+# AstralPool SLX / FLX colour palette (lighting model 0).
+# Other lighting models (Delta, Hayward, Pentair, JJ, Spa, Lumi) use the same
+# 0x01F5 SetZoneColour command but with different colour-name lists.
+SLX_FLX_COLOURS: dict[str, int] = {
+    "Blue": 0,
+    "Magenta": 1,
+    "Red": 2,
+    "Orange": 3,
+    "Green": 4,
+    "Aqua": 5,
+    "White": 6,
+    "Custom Colour": 7,
+    "Custom Pattern": 8,
+    "Rainbow": 9,
+    "Ocean": 10,
+    "Disco": 11,
+}
+
+LIGHT_COLOUR_SELECT_DESCRIPTION = HaloSelectEntityDescription(
+    key="light_colour_select",
+    name="Light Colour",
+    options=list(SLX_FLX_COLOURS.keys()),
+    entity_registry_enabled_default=False,
+    # Write-only for now: state read for lighting colour is not yet wired.
+    value_fn=lambda data: None,
+    command_fn=lambda client, option: client.set_light_colour(SLX_FLX_COLOURS[option]),
+)
+
 BLADE_SELECT_DESCRIPTION = HaloSelectEntityDescription(
     key="blade_mode_select",
     name="Blade Mode",
@@ -120,6 +148,7 @@ async def async_setup_entry(
             HaloModeSelect(coordinator),
             HaloPumpSpeedSelect(coordinator),
             HaloActionSelect(coordinator, LIGHT_SELECT_DESCRIPTION),
+            HaloActionSelect(coordinator, LIGHT_COLOUR_SELECT_DESCRIPTION),
             HaloActionSelect(coordinator, BLADE_SELECT_DESCRIPTION),
             HaloActionSelect(coordinator, JETS_SELECT_DESCRIPTION),
             HaloActionSelect(coordinator, HEATER_SELECT_DESCRIPTION),

@@ -748,6 +748,17 @@ class HaloWebSocketClient:
         await self._send_padded_write(LIGHT_CMD_ID, bytes([action]))
         self.data.light_mode = mode
 
+    async def set_light_colour(self, colour_value: int, zone: int = 0) -> None:
+        """Set the lighting colour for a zone using the SetZoneColour app action.
+
+        Mirrors the official app's SendAppAction_LightingSetColour:
+        cmd 0x01F5, payload = [action=5 (SetZoneColour), zone, colour_value].
+        Colour values are model-specific (0-11 for SLX/FLX).
+        """
+        await self._send_padded_write(
+            LIGHT_CMD_ID, bytes([5, zone & 0xFF, colour_value & 0xFF])
+        )
+
     async def set_equipment_mode(self, target_id: int, mode: str) -> None:
         """Set a generic equipment target using the 0x01F4 action path."""
         action = {value: key for key, value in ACTION_MODES.items()}.get(mode)
