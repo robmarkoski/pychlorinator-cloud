@@ -175,6 +175,11 @@ TIME_CMD_ID = 0x0002
 DATE_CMD_ID = 0x0003
 
 LIGHT_MODES = {1: "Off", 2: "On", 3: "Auto"}
+
+# Lighting AppActions enum (from decompiled BusinessObjects.Lighting.AppActions):
+# 1=SetZoneModeToManual, 2=SetZoneModeToAuto, 3=TurnOffZone,
+# 4=TurnOnZone, 5=SetZoneColour, 6=SynchroniseZoneColour
+LIGHT_MODE_ACTIONS = {"Off": 3, "On": 4, "Auto": 2}
 ACTION_MODES = {1: "Off", 2: "Auto", 3: "On"}
 
 BLADE_TARGET_ID = 6
@@ -740,12 +745,17 @@ class HaloWebSocketClient:
         await self.send_command(command)
         await self._refresh_after_action()
 
-    async def set_light_mode(self, mode: str) -> None:
-        """Set light mode using the app-confirmed 0x01F5 path."""
-        action = {value: key for key, value in LIGHT_MODES.items()}.get(mode)
+    async def set_light_mode(self, mode: str, zone: int = 0) -> None:
+        """Set light mode using the lighting app-action path on cmd 0x01F5.
+
+        Maps user-facing names to the BusinessObjects.Lighting.AppActions enum:
+        Off -> TurnOffZone (3), On -> TurnOnZone (4), Auto -> SetZoneModeToAuto (2).
+        Payload format mirrors the official app: [action, zone].
+        """
+        action = LIGHT_MODE_ACTIONS.get(mode)
         if action is None:
             raise ValueError(f"Invalid light mode: {mode}")
-        await self._send_padded_write(LIGHT_CMD_ID, bytes([action]))
+        await self._send_padded_write(LIGHT_CMD_ID, bytes([action, zone & 0xFF]))
         self.data.light_mode = mode
 
     async def set_light_colour(self, colour_value: int, zone: int = 0) -> None:
