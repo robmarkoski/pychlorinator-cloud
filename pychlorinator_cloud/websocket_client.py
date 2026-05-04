@@ -99,6 +99,10 @@ class ChlorinatorLiveData:
 
     # App-writable controls not yet fully observable from readback
     light_mode: Optional[str] = None  # Off, On, Auto
+    light_colour: Optional[str] = None  # SLX/FLX colour name (Blue, Magenta, ...)
+    light_zone_modes: list[int] = field(default_factory=list)  # raw zone mode bytes
+    light_zone_colours: list[int] = field(default_factory=list)  # raw colour values
+    light_zone_on_flags: int = 0  # bitfield: bit 0 = Zone1On, etc.
     blade_mode: Optional[str] = None  # Off, Auto, On
     jets_mode: Optional[str] = None  # Off, Auto, On
     acid_dosing_state: Optional[str] = None  # ResumeNow, OffIndefinitely, OffForPeriod
@@ -175,7 +179,19 @@ TIME_CMD_ID = 0x0002
 DATE_CMD_ID = 0x0003
 
 LIGHT_MODES = {1: "Off", 2: "On", 3: "Auto"}
+
+# Lighting AppActions enum (from decompiled BusinessObjects.Lighting.AppActions):
+# 1=SetZoneModeToManual, 2=SetZoneModeToAuto, 3=TurnOffZone,
+# 4=TurnOnZone, 5=SetZoneColour, 6=SynchroniseZoneColour
+LIGHT_MODE_ACTIONS = {"Off": 3, "On": 4, "Auto": 2}
 ACTION_MODES = {1: "Off", 2: "Auto", 3: "On"}
+
+# SLX/FLX (lighting model 0) colour names indexed by colour value byte.
+# Confirmed from BusinessObjects.Light.LightColour static fields.
+SLX_FLX_COLOUR_NAMES = [
+    "Blue", "Magenta", "Red", "Orange", "Green", "Aqua", "White",
+    "Custom Colour", "Custom Pattern", "Rainbow", "Ocean", "Disco",
+]
 
 BLADE_TARGET_ID = 6
 JETS_TARGET_ID = 7
@@ -433,6 +449,53 @@ def _parse_timer_config(data: bytes) -> dict[str, Any]:
     return parse_timer_config(data)
 
 
+def _parse_lighting_state(data: bytes) -> dict[str, Any]:
+    """Parse lighting state characteristic (cmd 0x012C / 300).
+
+    Layout, confirmed by RE'ing the official Halo Chlor Go app:
+        bytes 0-3: ZoneModes[4]    (0=Off/default, 1=Auto, 2=Manual)
+        bytes 4-7: ZoneColours[4]  (model-specific value, SLX/FLX = 0..11)
+        byte 8:    ZoneStateFlags  (bit 0=Zone1On, bit 1=Zone2On, ...)
+        byte 9:    ActiveTimer
+        byte 10+:  Flags + time fields, not used here
+
+    For typical single-zone installs we expose Zone1's state as the user-facing
+    light_mode/light_colour. Multi-zone installs would need richer modelling.
+    """
+    result: dict[str, Any] = {"type": "lighting_state"}
+    if len(data) < 9:
+        return result
+
+    zone_modes = list(data[0:4])
+    zone_colours = list(data[4:8])
+    zone_state_flags = data[8]
+
+    result["zone_modes"] = zone_modes
+    result["zone_colours"] = zone_colours
+    result["zone_state_flags"] = zone_state_flags
+    result["zone1_on"] = bool(zone_state_flags & 0x01)
+
+    zone1_mode = zone_modes[0]
+    zone1_colour_value = zone_colours[0]
+
+    # Map mode + on-state to the user-facing Off/On/Auto string.
+    # Manual mode (2) with the on-flag set = "On"; mode 1 (Auto) follows the
+    # chlorinator's auto/timer schedule; mode 0 with no on-flag = "Off".
+    if zone1_mode == 1:
+        result["light_mode"] = "Auto"
+    elif result["zone1_on"]:
+        result["light_mode"] = "On"
+    else:
+        result["light_mode"] = "Off"
+
+    if 0 <= zone1_colour_value < len(SLX_FLX_COLOUR_NAMES):
+        result["light_colour"] = SLX_FLX_COLOUR_NAMES[zone1_colour_value]
+    else:
+        result["light_colour"] = None
+
+    return result
+
+
 def parse_data_payload(raw: bytes) -> dict[str, Any]:
     """Parse a dataexchange payload.
 
@@ -486,6 +549,8 @@ def parse_data_payload(raw: bytes) -> dict[str, Any]:
         result.update(_parse_controller_date(data))
     elif cmd_id == 0x044E:
         result.update(_parse_heater_state(data))
+    elif cmd_id == 0x012C:
+        result.update(_parse_lighting_state(data))
     elif cmd_id == 0x0019:
         result["type"] = "unknown_0x0019"
     else:
@@ -636,6 +701,7 @@ class HaloWebSocketClient:
             104,
             105,
             106,
+            300,  # lighting state — zone modes, colours, on/off flags
             600,
             601,
             602,
@@ -740,13 +806,37 @@ class HaloWebSocketClient:
         await self.send_command(command)
         await self._refresh_after_action()
 
-    async def set_light_mode(self, mode: str) -> None:
-        """Set light mode using the app-confirmed 0x01F5 path."""
-        action = {value: key for key, value in LIGHT_MODES.items()}.get(mode)
+    async def set_light_mode(self, mode: str, zone: int = 0) -> None:
+        """Set light mode using the lighting app-action path on cmd 0x01F5.
+
+        Maps user-facing names to the BusinessObjects.Lighting.AppActions enum:
+        Off -> TurnOffZone (3), On -> TurnOnZone (4), Auto -> SetZoneModeToAuto (2).
+        Payload format mirrors the official app: [action, zone].
+        """
+        action = LIGHT_MODE_ACTIONS.get(mode)
         if action is None:
             raise ValueError(f"Invalid light mode: {mode}")
-        await self._send_padded_write(LIGHT_CMD_ID, bytes([action]))
+        await self._send_padded_write(
+            LIGHT_CMD_ID,
+            bytes([action, zone & 0xFF]),
+            refresh_cmd_ids=(0x0068, 0x012C),
+        )
         self.data.light_mode = mode
+
+    async def set_light_colour(self, colour_value: int, zone: int = 0) -> None:
+        """Set the lighting colour for a zone using the SetZoneColour app action.
+
+        Mirrors the official app's SendAppAction_LightingSetColour:
+        cmd 0x01F5, payload = [action=5 (SetZoneColour), zone, colour_value].
+        Colour values are model-specific (0-11 for SLX/FLX).
+        """
+        await self._send_padded_write(
+            LIGHT_CMD_ID,
+            bytes([5, zone & 0xFF, colour_value & 0xFF]),
+            refresh_cmd_ids=(0x0068, 0x012C),
+        )
+        if 0 <= colour_value < len(SLX_FLX_COLOUR_NAMES):
+            self.data.light_colour = SLX_FLX_COLOUR_NAMES[colour_value]
 
     async def set_equipment_mode(self, target_id: int, mode: str) -> None:
         """Set a generic equipment target using the 0x01F4 action path."""
@@ -1112,6 +1202,18 @@ class HaloWebSocketClient:
             self.data.heater_water_temp_c = parsed.get("heater_water_temp_c")
             self.data.heater_on = parsed.get("heater_on", False)
             self.data.heater_error = parsed.get("heater_error")
+        elif parsed.get("type") == "lighting_state":
+            zone_modes = parsed.get("zone_modes")
+            if zone_modes is not None:
+                self.data.light_zone_modes = list(zone_modes)
+            zone_colours = parsed.get("zone_colours")
+            if zone_colours is not None:
+                self.data.light_zone_colours = list(zone_colours)
+            self.data.light_zone_on_flags = parsed.get("zone_state_flags", 0)
+            light_mode = parsed.get("light_mode")
+            if light_mode is not None:
+                self.data.light_mode = light_mode
+            self.data.light_colour = parsed.get("light_colour")
         elif parsed.get("type") == "controller_time":
             controller_date = self.data.controller_datetime.date() if self.data.controller_datetime else None
             try:

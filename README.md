@@ -95,9 +95,51 @@ The intended user flow is:
 4. you choose the Home Assistant device name and optional area
 5. the integration connects over the cloud and creates entities
 
-### Manual credential path
+### Manual credential path (firmware 2.7+ workaround)
 
-A manual cloud-credential path still exists as a hidden fallback/debug path for cases where credentials are already known, but it is **not** the normal onboarding flow.
+On Halo Chlor firmware 2.7+, BLE pairing for third-party clients is blocked by a server-side gate that requires Google Play Integrity / Apple App Attest from the genuine vendor app. See [#1](https://github.com/robmarkoski/pychlorinator-cloud/issues/1) for the reverse-engineering detail. The local crypto path that earlier firmware accepted no longer produces a MAC the chlorinator will honour.
+
+This fork (branch `fw27-cloud-only-control`) exposes a manual-credential setup path so owners with affected firmware can still use the cloud integration, by reading the cloud credentials directly from the official app.
+
+#### What you need
+
+- A Halo chlorinator already paired via the official Halo Chlor Go Android app at least once.
+- The Android phone with that paired install.
+- A computer with `adb` (Android Platform Tools) installed, USB debugging enabled on the phone.
+
+#### Extracting the credentials
+
+1. Connect the phone to the computer via USB. Authorise the debugging connection on the phone if prompted.
+2. Confirm the device is visible:
+
+   ```bash
+   adb devices
+   ```
+
+3. Start a filtered logcat tail on the official app's process:
+
+   ```bash
+   adb logcat --pid=$(adb shell pidof au.com.fabtronics.halochlorgo)
+   ```
+
+4. Force-stop and re-launch the Halo Chlor Go app on the phone. The app writes the cloud credentials to stdout on launch.
+5. In the logcat output, find the line containing the chlorinator serial number (`sn`), a cloud `username`, and a 64-character `password`. Copy the three values.
+
+> [!WARNING]
+> The credentials are bearer secrets. Anyone holding them can control the chlorinator via the cloud. Do not share them, do not commit them to a repository, and do not paste them into chat, issues, or screenshots.
+
+#### Adding the integration
+
+1. In Home Assistant: **Settings → Devices & Services → Add Integration → AstralPool Halo Cloud**.
+2. Choose **Manual credential entry (advanced)** as the setup method.
+3. Paste the serial, username, and password.
+4. Confirm. The integration connects via the cloud and creates entities exactly as the BLE flow would.
+
+#### Operational wrinkle
+
+The Astralpool cloud appears to permit only one concurrent connection per chlorinator across all accounts. If the official Halo Chlor Go app is logged in on a phone and the Home Assistant integration connects, one of the two sessions gets disconnected.
+
+Workaround: disable the Home Assistant config entry (do not delete it) when you need the phone, re-enable when done.
 
 ## Capability matrix
 
