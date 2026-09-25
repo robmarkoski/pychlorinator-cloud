@@ -137,12 +137,23 @@ class HaloCloudCoordinator(DataUpdateCoordinator[ChlorinatorLiveData]):
     @callback
     def _maybe_ingest_acid(self) -> None:
         """Feed a fresh acid-dosing reading into the reservoir tracker."""
-        secs = self.client.data.acid_dosing_seconds_today
-        if secs is None or secs == self._acid_last_secs:
+        dosing_today = self.client.data.acid_dosing_seconds_today
+
+        if dosing_today is None or dosing_today == self._acid_last_secs:
             return
-        self._acid_last_secs = secs
+
+        firmware = self.client.data.firmware_version
         pump = self.client.data.acid_pump_size_ml_per_min
-        self.hass.async_create_task(self.acid.async_ingest(secs, pump))
+
+        self._acid_last_secs = dosing_today
+    
+        self.hass.async_create_task(
+            self.acid.async_ingest(
+                dosing_today,
+                pump,
+                firmware,
+            )
+        )
 
     @callback
     def _cancel_pending_publish(self) -> None:

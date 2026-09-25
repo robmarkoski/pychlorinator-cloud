@@ -1152,6 +1152,11 @@ class HaloWebSocketClient:
 
         LOGGER.debug("Extra-quiet staged post-connect refresh complete")
 
+        await self.request_data(
+            MEASUREMENTS_CMD_ID,
+            source="acid_debug_measurements",
+        )
+
     async def query_availability(self) -> dict[str, Any]:
         """Check chlorinator availability without connecting."""
         ssl_context = await self._get_ssl_context()
@@ -2417,6 +2422,15 @@ class HaloWebSocketClient:
                 data_bytes = base64.b64decode(data_b64)
                 self._first_payload_seen = True
                 self._trace_connect_event("rx", "dataexchange", data_bytes.hex())
+
+                if len(data_bytes) >= 16:
+                    cmd_id = struct.unpack_from("<H", data_bytes, 1)[0]
+            
+                    if cmd_id == MEASUREMENTS_CMD_ID:
+                        dosing_raw_bytes = data_bytes[14:16]
+                        dosing_raw_value = struct.unpack_from("<H", data_bytes, 14)[0]
+
+            
                 parsed = parse_data_payload(data_bytes)
                 self._update_data(parsed, data_bytes)
                 if self.on_data:
@@ -2822,8 +2836,7 @@ class HaloWebSocketClient:
             self.data.max_manual_acid_setpoint = parsed.get("max_manual_acid_setpoint")
             if parsed.get("dosing_capable") is not None:
                 self.data.dosing_capable = parsed.get("dosing_capable")
-            if parsed.get("acid_pump_size") is not None:
-                self.data.acid_pump_size_ml_per_min = parsed.get("acid_pump_size")
+
         elif parsed.get("type") == "temperature":
             if parsed.get("water_temp_c") is not None:
                 self.data.water_temperature_c = parsed["water_temp_c"]

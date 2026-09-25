@@ -1329,7 +1329,9 @@ ACID_SENSOR_SPECS: tuple[
             state_class=SensorStateClass.TOTAL,
         ),
         lambda c: c.acid.used_today_ml(
-            c.data.acid_dosing_seconds_today, c.data.acid_pump_size_ml_per_min
+            c.data.acid_dosing_seconds_today,
+            c.data.acid_pump_size_ml_per_min,
+            c.data.firmware_version,
         ),
     ),
     (
