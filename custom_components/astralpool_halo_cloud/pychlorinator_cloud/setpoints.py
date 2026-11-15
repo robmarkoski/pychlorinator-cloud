@@ -1,4 +1,4 @@
-"""Setpoint bounds and helpers for Halo pH/ORP writes.
+"""Setpoint bounds and helpers for Halo chemistry writes.
 
 Bounds note:
 - The decompiled app in this repo confirms that pH/ORP changes use a dedicated
@@ -29,6 +29,10 @@ PH_SETPOINT_STEP: Final[float] = 0.1
 
 ORP_SETPOINT_MIN_MV: Final[int] = 200
 ORP_SETPOINT_MAX_MV: Final[int] = 800
+
+POOL_CHLORINE_SETPOINT_MIN: Final[int] = 0
+POOL_CHLORINE_SETPOINT_MAX: Final[int] = 8
+POOL_CHLORINE_SETPOINT_STEP: Final[int] = 1
 
 
 class SetpointValidationError(ValueError):
@@ -73,11 +77,44 @@ def ph_setpoint_to_raw(value: float) -> int:
 
 
 def validate_orp_setpoint(value: int) -> int:
-    if not isinstance(value, int):
+    if isinstance(value, bool) or not isinstance(value, int):
         raise SetpointValidationError("ORP setpoint must be an integer in millivolts")
     if not ORP_SETPOINT_MIN_MV <= value <= ORP_SETPOINT_MAX_MV:
         raise SetpointValidationError(
             f"ORP setpoint must be between {ORP_SETPOINT_MIN_MV} and {ORP_SETPOINT_MAX_MV} mV"
+        )
+    return value
+
+
+def pool_chlorine_setpoint_bounds(
+    minimum: int | None = None, maximum: int | None = None
+) -> tuple[int, int]:
+    """Use a usable controller range, or fall back to the 0–8 manual scale.
+
+    Capability values are unsigned bytes. Treat absent, zero-width, or inverted
+    ranges as unavailable rather than exposing an unusable slider.
+    """
+    low = POOL_CHLORINE_SETPOINT_MIN if minimum is None else minimum
+    high = POOL_CHLORINE_SETPOINT_MAX if maximum is None else maximum
+    if (
+        type(low) is int
+        and type(high) is int
+        and 0 <= low < high <= 255
+    ):
+        return low, high
+    return POOL_CHLORINE_SETPOINT_MIN, POOL_CHLORINE_SETPOINT_MAX
+
+
+def validate_pool_chlorine_setpoint(
+    value: int, *, minimum: int | None = None, maximum: int | None = None
+) -> int:
+    """Validate an explicitly requested chlorine level against device bounds."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise SetpointValidationError("Pool chlorine setpoint must be an integer")
+    low, high = pool_chlorine_setpoint_bounds(minimum, maximum)
+    if not low <= value <= high:
+        raise SetpointValidationError(
+            f"Pool chlorine setpoint must be between {low} and {high}"
         )
     return value
 
@@ -95,6 +132,8 @@ def build_setpoint_payload(
         "<BHBBB",
         ph_setpoint_to_raw(ph_setpoint),
         validate_orp_setpoint(orp_setpoint),
+        # This may be an unchanged controller value in a pH/ORP write. Validate
+        # requested chlorine changes in the client, without narrowing snapshots.
         _require_byte("pool_chlorine_setpoint", pool_chlorine_setpoint),
         _require_byte("acid_setpoint", acid_setpoint),
         _require_byte("spa_chlorine_setpoint", spa_chlorine_setpoint),

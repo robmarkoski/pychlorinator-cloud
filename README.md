@@ -82,6 +82,7 @@ These are the entities users actively interact with. All cloud-backed writes req
 | `pump_speed_select` | select | Experimental. Manual `Low`, `Medium`, and `High` writes exist, but reliability is still under investigation. |
 | `heater_mode_select`, `heater_setpoint_control` | select, number | Experimental. Requires heater data from the controller. |
 | `ph_setpoint_control`, `orp_setpoint_control` | number | Experimental. Uses guarded setpoint writes and controller-reported bounds when available. |
+| `pool_chlorine_setpoint_control` | number | Experimental. Adjusts the pool's manual chlorine level in whole steps, using controller-reported bounds or a fallback of 0–8. This is a controller level, not a measured chlorine concentration. |
 | `light_mode_select`, `blade_mode_select`, `jets_mode_select` | select | Experimental, accessory-dependent, disabled by default. |
 | `acid_dosing_select` | select | Experimental, disabled by default. Dosing controls are not a substitute for water testing. |
 | `connection_pause_select`, `connection_pause_minutes` | select, number | Local HA controls for temporarily releasing the cloud connection. Useful when opening the vendor app. |
@@ -445,6 +446,17 @@ Do not include:
 ## Contributing
 
 Contributions are welcome, but this project needs careful testing more than broad feature churn.
+
+Run the isolated setpoint and number-platform tests with:
+
+```sh
+python -m pip install 'websockets>=12.0'
+python -m unittest discover -s tests -t . -v
+```
+
+The tests use Home Assistant stubs and mock network sends. They verify command
+encoding, preserved setpoints, validation, and entity behaviour; they do not
+verify Home Assistant setup or acceptance of commands by a physical controller.
 
 Good issues and pull requests include:
 
