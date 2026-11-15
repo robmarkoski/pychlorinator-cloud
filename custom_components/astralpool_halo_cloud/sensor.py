@@ -7,8 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from homeassistant.components.sensor import (
-    EntityCategory,
+from homeassistant.components.sensor import (    
     SensorDeviceClass,
     SensorEntity,
     SensorEntityDescription,
@@ -16,6 +15,7 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
+    EntityCategory,
     UnitOfElectricCurrent,
     UnitOfTemperature,
     UnitOfTime,
